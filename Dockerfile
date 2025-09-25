@@ -98,4 +98,4 @@ USER app
 
 # Set entrypoint and command
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--max-requests", "1000", "--access-logfile", "-", "--error-logfile", "-", "wsgi:application"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 1 --timeout 120 --log-level debug --access-logfile - --error-logfile - --preload wsgi:application"]

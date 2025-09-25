@@ -1,11 +1,30 @@
 #!/bin/bash
 set -e
 
+echo "=== Tryton Entrypoint Starting ==="
+echo "Environment variables:"
+echo "  PORT: ${PORT}"
+echo "  DATABASE_URL: ${DATABASE_URL:0:30}..."
+echo "  DATABASE_NAME: ${DATABASE_NAME}"
+echo "  ADMIN_EMAIL: ${ADMIN_EMAIL}"
+echo "  TRYTON_CONFIG: ${TRYTON_CONFIG}"
+
 export PYTHONPATH="/app:${PYTHONPATH}"
 export TRYTOND_CONFIG="${TRYTON_CONFIG:-/app/railway-trytond.conf}"
 
+echo "PYTHONPATH: ${PYTHONPATH}"
+echo "TRYTOND_CONFIG: ${TRYTOND_CONFIG}"
+
 # Create required directories
+echo "Creating directories..."
 mkdir -p /app/uploads /app/logs /app/attachments
+
+# Check if config file exists
+if [ -f "${TRYTOND_CONFIG}" ]; then
+    echo "Config file found: ${TRYTOND_CONFIG}"
+else
+    echo "WARNING: Config file not found: ${TRYTOND_CONFIG}"
+fi
 
 # Wait for database
 echo "Waiting for database connection..."
@@ -41,6 +60,10 @@ if db_url:
 # Initialize database if needed
 DATABASE_NAME="${DATABASE_NAME:-divvyqueue_prod}"
 
+echo "=== Database Initialization Phase ==="
+echo "Database name: ${DATABASE_NAME}"
+echo "Skip DB init: ${SKIP_DB_INIT}"
+
 echo "Checking database initialization..."
 if [ "${SKIP_DB_INIT}" != "true" ]; then
     if ! python3 -c "
@@ -65,5 +88,20 @@ except:
     fi
 fi
 
-echo "Starting Tryton server..."
+echo "=== Starting Tryton Server ==="
+echo "Command to execute: $@"
+echo "Current working directory: $(pwd)"
+echo "Python version: $(python3 --version)"
+echo "Gunicorn version: $(gunicorn --version 2>/dev/null || echo 'gunicorn not found')"
+
+# Test if wsgi module can be imported
+echo "Testing WSGI module import..."
+python3 -c "
+try:
+    import wsgi
+    print('✓ WSGI module imported successfully')
+except Exception as e:
+    print(f'✗ WSGI module import failed: {e}')
+"
+
 exec "$@"
