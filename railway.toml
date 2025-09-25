@@ -15,7 +15,7 @@ buildCommand = """
 """
 
 [deploy]
-startCommand = "gunicorn -w 4 -b 0.0.0.0:$PORT --timeout 120 --keepalive 2 --max-requests 1000 --max-requests-jitter 50 trytond.wsgi:application"
+startCommand = "/app/start_server.sh"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"
@@ -47,9 +47,7 @@ SESSION_TIMEOUT = "3600"
 MAX_REQUEST_SIZE = "50M"
 
 # Performance
-WORKER_PROCESSES = "4"
-WORKER_CONNECTIONS = "1000"
-KEEPALIVE_TIMEOUT = "2"
+WORKERS = "2"
 
 # Logging
 LOG_LEVEL = "INFO"

@@ -16,5 +16,4 @@ exec gunicorn \
     --log-level info \
     --access-logfile - \
     --error-logfile - \
-    --preload \
     wsgi:application
