@@ -76,9 +76,10 @@ COPY --chown=app:app railway-trytond.conf /app/railway-trytond.conf
 COPY --chown=app:app health_check.py /app/health_check.py
 COPY --chown=app:app entrypoint.sh /app/entrypoint.sh
 COPY --chown=app:app wsgi.py /app/wsgi.py
+COPY --chown=app:app start_server.sh /app/start_server.sh
 
-RUN chmod +x /app/health_check.py /app/entrypoint.sh && \
-    chown app:app /app/health_check.py /app/entrypoint.sh /app/wsgi.py
+RUN chmod +x /app/health_check.py /app/entrypoint.sh /app/start_server.sh && \
+    chown app:app /app/health_check.py /app/entrypoint.sh /app/wsgi.py /app/start_server.sh
 
 # Set environment variables
 ENV PYTHONPATH=/app \
@@ -98,4 +99,4 @@ USER app
 
 # Set entrypoint and command
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 1 --timeout 120 --log-level debug --access-logfile - --error-logfile - --preload wsgi:application"]
+CMD ["/app/start_server.sh"]

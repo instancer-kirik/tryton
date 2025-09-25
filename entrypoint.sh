@@ -15,6 +15,19 @@ export TRYTOND_CONFIG="${TRYTON_CONFIG:-/app/railway-trytond.conf}"
 echo "PYTHONPATH: ${PYTHONPATH}"
 echo "TRYTOND_CONFIG: ${TRYTOND_CONFIG}"
 
+# Configure database URI from Railway environment
+if [ -n "${DATABASE_URL}" ]; then
+    echo "Updating Tryton config with Railway DATABASE_URL..."
+
+    # Create a temporary config with the database URI
+    sed "s|uri = postgresql://|uri = ${DATABASE_URL}|g" ${TRYTOND_CONFIG} > /tmp/trytond.conf
+    export TRYTOND_CONFIG="/tmp/trytond.conf"
+
+    echo "Database URI configured from Railway"
+else
+    echo "WARNING: No DATABASE_URL found"
+fi
+
 # Create required directories
 echo "Creating directories..."
 mkdir -p /app/uploads /app/logs /app/attachments
