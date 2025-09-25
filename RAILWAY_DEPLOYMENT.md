@@ -83,7 +83,7 @@ railway variables set CORS_ORIGINS="https://your-divvyqueue-app.railway.app,http
 
 # Optional but recommended
 railway variables set EMAIL_HOST="smtp.gmail.com"
-railway variables set EMAIL_USER="your-email@gmail.com" 
+railway variables set EMAIL_USER="your-email@gmail.com"
 railway variables set EMAIL_PASSWORD="your-app-password"
 ```
 
@@ -100,7 +100,7 @@ git push origin main
 ## Detailed Configuration
 
 ### Environment Variables Reference
-
+okay try again
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string | Auto-set by Railway |
