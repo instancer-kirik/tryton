@@ -1,0 +1,75 @@
+# Tryton ERP Requirements for Railway Deployment
+# Core dependencies for DivvyQueue integration
+
+# Core Tryton packages
+trytond>=6.0.0,<6.1
+proteus>=6.0.0,<6.1
+
+# Database drivers
+psycopg2-binary>=2.9.0
+
+# Web server
+gunicorn>=20.1.0
+werkzeug>=2.3.0
+
+# Caching
+redis>=4.0.0
+
+# Cryptography and security
+bcrypt>=4.0.0
+passlib[argon2]>=1.7.0
+
+# Date/time handling
+pytz>=2023.3
+python-dateutil>=2.8.0
+
+# XML/HTML processing
+lxml>=4.9.0
+
+# Report generation
+relatorio>=0.10.0
+
+# SQL abstraction
+python-sql>=1.4.0
+
+# HTTP requests
+requests>=2.31.0
+
+# Standard number formats
+python-stdnum>=1.19
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Tryton modules for DivvyQueue business logic
+trytond-party>=6.0.0,<6.1
+trytond-product>=6.0.0,<6.1
+trytond-sale>=6.0.0,<6.1
+trytond-purchase>=6.0.0,<6.1
+trytond-account>=6.0.0,<6.1
+trytond-stock>=6.0.0,<6.1
+trytond-project>=6.0.0,<6.1
+trytond-company>=6.0.0,<6.1
+trytond-currency>=6.0.0,<6.1
+trytond-country>=6.0.0,<6.1
+
+# Optional but recommended modules
+trytond-account-invoice>=6.0.0,<6.1
+trytond-account-payment>=6.0.0,<6.1
+trytond-sale-opportunity>=6.0.0,<6.1
+
+# Development and debugging (optional)
+# Uncomment for development deployments
+# ipython>=8.0.0
+# ipdb>=0.13.0
+
+# Production monitoring (optional)
+# sentry-sdk>=1.32.0
+# structlog>=23.1.0
+
+# Email support (optional)
+# django-anymail>=10.0
+
+# File storage (optional for attachments)
+# boto3>=1.28.0  # For S3 storage
+# azure-storage-blob>=12.0.0  # For Azure storage

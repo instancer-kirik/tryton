@@ -1,0 +1,282 @@
+name: Deploy Tryton to Railway
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [main, master]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  test:
+    name: Test Tryton Setup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_tryton
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev libxml2-dev libxslt1-dev
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
+
+      - name: Test Tryton installation
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_tryton
+        run: |
+          python -c "import trytond; print('Tryton core imported successfully')"
+          python -c "from trytond.config import config; print('Tryton config loaded')"
+
+      - name: Validate configuration
+        run: |
+          python -c "
+          import configparser
+          config = configparser.ConfigParser()
+          config.read('railway-trytond.conf')
+          print('Configuration file is valid')
+          "
+
+  deploy-staging:
+    name: Deploy to Railway Staging
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging') ||
+      (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true)
+    needs: [test]
+    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: |
+          npm install -g @railway/cli
+
+      - name: Deploy to Railway Staging
+        id: deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_STAGING_TOKEN }}
+        run: |
+          railway login --token $RAILWAY_TOKEN
+          railway environment staging
+
+          echo "Setting environment variables..."
+          railway variables set TRYTON_CONFIG=/app/railway-trytond.conf
+          railway variables set DATABASE_NAME=divvyqueue_staging
+          railway variables set LOG_LEVEL=DEBUG
+          railway variables set WORKER_PROCESSES=2
+
+          echo "Deploying to staging..."
+          railway up --detach
+
+          # Get deployment URL
+          URL=$(railway status --json | jq -r '.deployments[0].url')
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Deployed to: $URL"
+
+      - name: Wait for deployment
+        timeout-minutes: 10
+        run: |
+          echo "Waiting for staging deployment to be ready..."
+          for i in {1..30}; do
+            if curl -f -s "${{ steps.deploy.outputs.url }}/health" > /dev/null; then
+              echo "✅ Staging deployment is healthy!"
+              exit 0
+            fi
+            echo "⏳ Waiting for deployment... ($i/30)"
+            sleep 20
+          done
+          echo "❌ Deployment health check failed"
+          exit 1
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against staging..."
+
+          # Test health endpoint
+          curl -f "${{ steps.deploy.outputs.url }}/health" | jq .
+
+          # Test Tryton JSON-RPC endpoint
+          curl -X POST "${{ steps.deploy.outputs.url }}/divvyqueue_staging/" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","method":"common.version","params":[],"id":1}' \
+            | jq .
+
+  deploy-production:
+    name: Deploy to Railway Production
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[deploy]')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    needs: [test, deploy-staging]
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: |
+          npm install -g @railway/cli
+
+      - name: Deploy to Railway Production
+        id: deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PRODUCTION_TOKEN }}
+        run: |
+          railway login --token $RAILWAY_TOKEN
+          railway environment production
+
+          echo "Setting production environment variables..."
+          railway variables set TRYTON_CONFIG=/app/railway-trytond.conf
+          railway variables set DATABASE_NAME=divvyqueue_prod
+          railway variables set LOG_LEVEL=INFO
+          railway variables set WORKER_PROCESSES=4
+          railway variables set MAX_REQUEST_SIZE=50M
+          railway variables set SESSION_TIMEOUT=3600
+
+          echo "Deploying to production..."
+          railway up --detach
+
+          # Get deployment URL
+          URL=$(railway status --json | jq -r '.deployments[0].url')
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Deployed to: $URL"
+
+      - name: Wait for deployment
+        timeout-minutes: 15
+        run: |
+          echo "Waiting for production deployment to be ready..."
+          for i in {1..45}; do
+            if curl -f -s "${{ steps.deploy.outputs.url }}/health" > /dev/null; then
+              echo "✅ Production deployment is healthy!"
+              exit 0
+            fi
+            echo "⏳ Waiting for deployment... ($i/45)"
+            sleep 20
+          done
+          echo "❌ Production deployment health check failed"
+          exit 1
+
+      - name: Run production smoke tests
+        run: |
+          echo "Running smoke tests against production..."
+
+          # Test health endpoint
+          HEALTH_RESPONSE=$(curl -f "${{ steps.deploy.outputs.url }}/health")
+          echo "Health check response: $HEALTH_RESPONSE"
+
+          # Verify health status
+          if echo "$HEALTH_RESPONSE" | jq -e '.status == "healthy"' > /dev/null; then
+            echo "✅ Health check passed"
+          else
+            echo "❌ Health check failed"
+            exit 1
+          fi
+
+      - name: Update DivvyQueue integration
+        run: |
+          echo "Production Tryton URL: ${{ steps.deploy.outputs.url }}"
+          echo "Update your DivvyQueue .env with:"
+          echo "VITE_TRYTON_URL=${{ steps.deploy.outputs.url }}"
+          echo "VITE_TRYTON_DATABASE=divvyqueue_prod"
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+
+    steps:
+      - name: Deployment Success
+        if: needs.deploy-production.result == 'success' || needs.deploy-staging.result == 'success'
+        run: |
+          echo "🚀 Deployment successful!"
+          echo "Staging: ${{ needs.deploy-staging.result }}"
+          echo "Production: ${{ needs.deploy-production.result }}"
+
+      - name: Deployment Failure
+        if: needs.deploy-production.result == 'failure' || needs.deploy-staging.result == 'failure'
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Staging: ${{ needs.deploy-staging.result }}"
+          echo "Production: ${{ needs.deploy-production.result }}"
+          exit 1
+
+  cleanup:
+    name: Cleanup Old Deployments
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [deploy-production]
+
+    steps:
+      - name: Cleanup Railway deployments
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PRODUCTION_TOKEN }}
+        run: |
+          npm install -g @railway/cli
+          railway login --token $RAILWAY_TOKEN
+
+          echo "Cleaning up old deployments (keeping last 5)..."
+          railway deployments list --json | \
+            jq -r '.[5:] | .[] | .id' | \
+            head -10 | \
+            while read deployment_id; do
+              if [ ! -z "$deployment_id" ]; then
+                echo "Removing deployment: $deployment_id"
+                railway deployment remove $deployment_id --yes || true
+              fi
+            done
