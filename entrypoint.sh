@@ -72,28 +72,17 @@ echo "=== Database Initialization Phase ==="
 echo "Database name: ${DATABASE_NAME}"
 echo "Skip DB init: ${SKIP_DB_INIT}"
 
-echo "Checking database initialization..."
+echo "Running database initialization..."
 if [ "${SKIP_DB_INIT}" != "true" ]; then
-    if ! python3 -c "
-from trytond.pool import Pool
-from trytond.config import config
-config.update_etc('${TRYTOND_CONFIG}')
-try:
-    pool = Pool('${DATABASE_NAME}')
-    print('Database already initialized')
-except:
-    print('Database needs initialization')
-    exit(1)
-" 2>/dev/null; then
-        echo "Initializing database..."
-        trytond-admin -c "${TRYTOND_CONFIG}" -d "${DATABASE_NAME}" --all
-
-        if [ -n "${TRYTON_ADMIN_PASSWORD}" ]; then
-            echo "${TRYTON_ADMIN_PASSWORD}" | trytond-admin -c "${TRYTOND_CONFIG}" -d "${DATABASE_NAME}" --password
-        fi
-
-        echo "Database initialization complete"
+    python3 /app/init_database.py
+    if [ $? -eq 0 ]; then
+        echo "✓ Database initialization completed successfully"
+    else
+        echo "✗ Database initialization failed"
+        exit 1
     fi
+else
+    echo "Skipping database initialization (SKIP_DB_INIT=true)"
 fi
 
 echo "=== Starting Tryton Server ==="
