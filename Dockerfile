@@ -72,14 +72,17 @@ RUN pip install --no-cache-dir \
 COPY --chown=app:app . .
 COPY --chown=app:app railway-trytond.conf /app/railway-trytond.conf
 
+# Add cache busting for Python files
+RUN echo "Cache bust: $(date)" > /app/cache_bust.txt
+
 # Copy script files and make them executable
 COPY --chown=app:app health_check.py /app/health_check.py
 COPY --chown=app:app entrypoint.sh /app/entrypoint.sh
 COPY --chown=app:app wsgi.py /app/wsgi.py
 COPY --chown=app:app start_server.sh /app/start_server.sh
 
-RUN chmod +x /app/health_check.py /app/entrypoint.sh /app/start_server.sh && \
-    chown app:app /app/health_check.py /app/entrypoint.sh /app/wsgi.py /app/start_server.sh
+RUN chmod +x /app/health_check.py /app/entrypoint.sh /app/start_server.sh /app/init_database.py && \
+    chown app:app /app/health_check.py /app/entrypoint.sh /app/wsgi.py /app/start_server.sh /app/init_database.py
 
 # Set environment variables
 ENV PYTHONPATH=/app \
