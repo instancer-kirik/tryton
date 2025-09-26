@@ -3,11 +3,15 @@ import sys
 import json
 import time
 
+# Version identifier to verify deployment
+WSGI_VERSION = "v2.0-20250926"
+print(f"Loading WSGI application version: {WSGI_VERSION}")
+
 # Load Tryton configuration once at startup
 def load_tryton():
     """Load and configure Tryton application"""
     try:
-        print("=== Loading Tryton Application ===")
+        print(f"=== Loading Tryton Application {WSGI_VERSION} ===")
         from trytond.config import config
         from trytond.wsgi import app as tryton_app
 
@@ -54,6 +58,7 @@ def health_check(environ, start_response):
         'path': environ.get('PATH_INFO', ''),
         'method': environ.get('REQUEST_METHOD', 'GET'),
         'tryton_loaded': tryton_app is not None,
+        'wsgi_version': WSGI_VERSION,
         'message': 'Tryton ready' if tryton_app else 'Tryton failed to load'
     }
 
