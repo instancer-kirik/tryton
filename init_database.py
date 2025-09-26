@@ -84,11 +84,14 @@ def initialize_database():
 
         if result.returncode == 0:
             log("✓ Database initialization completed successfully")
-            log("STDOUT:", result.stdout)
+            if result.stdout.strip():
+                log(f"STDOUT: {result.stdout}")
         else:
             log("✗ Database initialization failed")
-            log("STDERR:", result.stderr)
-            log("STDOUT:", result.stdout)
+            if result.stderr.strip():
+                log(f"STDERR: {result.stderr}")
+            if result.stdout.strip():
+                log(f"STDOUT: {result.stdout}")
             return False
 
         # Set admin password if provided
@@ -114,7 +117,8 @@ def initialize_database():
                 log("✓ Admin password set successfully")
             else:
                 log("⚠ Failed to set admin password")
-                log("STDERR:", result.stderr)
+                if result.stderr.strip():
+                    log(f"STDERR: {result.stderr}")
 
         return True
 
