@@ -15,7 +15,7 @@ buildCommand = """
 """
 
 [deploy]
-startCommand = "/app/start_server.sh"
+startCommand = "/app/entrypoint.sh /app/start_server.sh"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"

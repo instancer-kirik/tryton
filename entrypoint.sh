@@ -41,34 +41,29 @@ fi
 
 # Wait for database
 echo "Waiting for database connection..."
-python3 -c "
+if [ -n "${DATABASE_URL}" ]; then
+    python3 -c "
 import os
 import time
 import psycopg2
-from urllib.parse import urlparse
 
 db_url = os.environ.get('DATABASE_URL')
-if db_url:
-    parsed = urlparse(db_url)
-    for i in range(60):
-        try:
-            conn = psycopg2.connect(
-                host=parsed.hostname,
-                port=parsed.port or 5432,
-                database=parsed.path[1:] if parsed.path else 'postgres',
-                user=parsed.username,
-                password=parsed.password
-            )
-            conn.close()
-            print('Database connection successful')
-            break
-        except Exception as e:
-            print(f'Waiting for database... ({i+1}/60)')
-            time.sleep(2)
-    else:
-        print('Database connection failed after 2 minutes')
-        exit(1)
+for i in range(30):
+    try:
+        conn = psycopg2.connect(db_url)
+        conn.close()
+        print('✓ Database connection successful')
+        break
+    except Exception as e:
+        print(f'Waiting for database... ({i+1}/30) - {e}')
+        time.sleep(2)
+else:
+    print('✗ Database connection failed after 1 minute')
+    exit(1)
 "
+else
+    echo "⚠ No DATABASE_URL provided - skipping database check"
+fi
 
 # Initialize database if needed
 DATABASE_NAME="${DATABASE_NAME:-divvyqueue_prod}"
