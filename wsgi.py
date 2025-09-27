@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+from wsgiref.util import FileWrapper
 
 # Version identifier to verify deployment
 WSGI_VERSION = "v2.0-20250926"
@@ -72,15 +73,67 @@ def health_check(environ, start_response):
     start_response(status, headers)
     return [response_body]
 
+def serve_static_file(file_path, environ, start_response):
+    """Serve static files for SAO web client"""
+    try:
+        if not os.path.exists(file_path):
+            status = '404 Not Found'
+            headers = [('Content-Type', 'text/plain')]
+            start_response(status, headers)
+            return [b'File not found']
+
+        # Determine content type
+        content_type = 'text/html'
+        if file_path.endswith('.js'):
+            content_type = 'application/javascript'
+        elif file_path.endswith('.css'):
+            content_type = 'text/css'
+        elif file_path.endswith('.png'):
+            content_type = 'image/png'
+        elif file_path.endswith('.svg'):
+            content_type = 'image/svg+xml'
+        elif file_path.endswith('.wav'):
+            content_type = 'audio/wav'
+        elif file_path.endswith('.json'):
+            content_type = 'application/json'
+
+        with open(file_path, 'rb') as f:
+            file_data = f.read()
+
+        status = '200 OK'
+        headers = [
+            ('Content-Type', content_type),
+            ('Content-Length', str(len(file_data)))
+        ]
+        start_response(status, headers)
+        return [file_data]
+
+    except Exception as e:
+        print(f"Error serving static file {file_path}: {e}")
+        status = '500 Internal Server Error'
+        headers = [('Content-Type', 'text/plain')]
+        start_response(status, headers)
+        return [f'Error serving file: {str(e)}'.encode('utf-8')]
+
 def application(environ, start_response):
     """Main WSGI application"""
-    path = environ.get('PATH_INFO', '')
+    path = environ.get('PATH_INFO', '').rstrip('/')
 
     # Health check endpoint
     if path == '/health':
         return health_check(environ, start_response)
 
-    # If Tryton loaded successfully, delegate everything else to it
+    # Serve SAO static files
+    sao_root = '/app/sao'
+    if path == '' or path == '/':
+        # Serve index.html for root path
+        return serve_static_file(os.path.join(sao_root, 'index.html'), environ, start_response)
+    elif path.startswith('/dist/') or path.startswith('/images/') or path.startswith('/sounds/') or path.startswith('/locale/'):
+        # Serve static assets
+        file_path = os.path.join(sao_root, path.lstrip('/'))
+        return serve_static_file(file_path, environ, start_response)
+
+    # If Tryton loaded successfully, delegate API requests to it
     if tryton_app:
         try:
             return tryton_app(environ, start_response)
