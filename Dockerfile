@@ -3,7 +3,7 @@
 
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies including Node.js for SAO build
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     postgresql-client \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user and directories
@@ -71,6 +73,16 @@ RUN pip install --no-cache-dir \
 # Copy application code and configuration
 COPY --chown=app:app . .
 COPY --chown=app:app railway-trytond.conf /app/railway-trytond.conf
+
+# Build SAO web client
+WORKDIR /app/sao
+RUN npm install --legacy-peer-deps && \
+    npx grunt && \
+    rm -rf node_modules bower_components && \
+    chown -R app:app /app/sao
+
+# Return to app directory
+WORKDIR /app
 
 # Add cache busting for Python files
 RUN echo "Cache bust: $(date)" > /app/cache_bust.txt
