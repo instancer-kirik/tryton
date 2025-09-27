@@ -127,6 +127,74 @@ def serve_static_file(file_path, environ, start_response):
         start_response(status, headers)
         return [f'Error serving file: {str(e)}'.encode('utf-8')]
 
+def init_database_endpoint(environ, start_response):
+    """Database initialization endpoint"""
+    try:
+        from trytond.pool import Pool
+        from trytond.config import config
+        import subprocess
+
+        config_file = os.environ.get('TRYTON_CONFIG', '/app/railway-trytond.conf')
+        database_name = os.environ.get('DATABASE_NAME', 'divvyqueue_prod')
+
+        if os.path.exists(config_file):
+            config.update_etc(config_file)
+
+        response_data = {'status': 'checking', 'database': database_name}
+
+        # Check if database is already initialized
+        try:
+            pool = Pool(database_name)
+            pool.init()
+            with pool.transaction().start(database_name, 1, context={}):
+                User = pool.get('res.user')
+                users = User.search([])
+                response_data.update({
+                    'status': 'already_initialized',
+                    'message': f'Database already initialized with {len(users)} users'
+                })
+        except Exception:
+            # Database not initialized, try to initialize
+            try:
+                cmd = ['trytond-admin', '-c', config_file, '-d', database_name, '--all']
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+                if result.returncode == 0:
+                    response_data.update({
+                        'status': 'initialized',
+                        'message': 'Database initialized successfully'
+                    })
+                else:
+                    response_data.update({
+                        'status': 'failed',
+                        'message': f'Initialization failed: {result.stderr}'
+                    })
+            except Exception as e:
+                response_data.update({
+                    'status': 'error',
+                    'message': f'Initialization error: {str(e)}'
+                })
+
+        response_body = json.dumps(response_data).encode('utf-8')
+        status = '200 OK'
+        headers = add_cors_headers([
+            ('Content-Type', 'application/json'),
+            ('Content-Length', str(len(response_body)))
+        ])
+        start_response(status, headers)
+        return [response_body]
+
+    except Exception as e:
+        error_data = {'status': 'error', 'message': str(e)}
+        error_body = json.dumps(error_data).encode('utf-8')
+        status = '500 Internal Server Error'
+        headers = add_cors_headers([
+            ('Content-Type', 'application/json'),
+            ('Content-Length', str(len(error_body)))
+        ])
+        start_response(status, headers)
+        return [error_body]
+
 def application(environ, start_response):
     """Main WSGI application"""
     path = environ.get('PATH_INFO', '').rstrip('/')
@@ -142,6 +210,10 @@ def application(environ, start_response):
     # Health check endpoint
     if path == '/health':
         return health_check(environ, start_response)
+
+    # Database initialization endpoint
+    if path == '/init-database' and method == 'POST':
+        return init_database_endpoint(environ, start_response)
 
     # Serve SAO static files
     sao_root = '/app/sao'
