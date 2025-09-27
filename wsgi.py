@@ -51,6 +51,16 @@ def load_tryton():
 # Load Tryton app at module level
 tryton_app = load_tryton()
 
+def add_cors_headers(headers):
+    """Add CORS headers to allow cross-origin requests"""
+    cors_headers = [
+        ('Access-Control-Allow-Origin', '*'),
+        ('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS'),
+        ('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With'),
+        ('Access-Control-Max-Age', '86400'),
+    ]
+    return headers + cors_headers
+
 def health_check(environ, start_response):
     """Health check endpoint for Railway"""
     response_data = {
@@ -69,6 +79,7 @@ def health_check(environ, start_response):
         ('Content-Type', 'application/json'),
         ('Content-Length', str(len(response_body)))
     ]
+    headers = add_cors_headers(headers)
 
     start_response(status, headers)
     return [response_body]
@@ -105,6 +116,7 @@ def serve_static_file(file_path, environ, start_response):
             ('Content-Type', content_type),
             ('Content-Length', str(len(file_data)))
         ]
+        headers = add_cors_headers(headers)
         start_response(status, headers)
         return [file_data]
 
@@ -118,6 +130,14 @@ def serve_static_file(file_path, environ, start_response):
 def application(environ, start_response):
     """Main WSGI application"""
     path = environ.get('PATH_INFO', '').rstrip('/')
+    method = environ.get('REQUEST_METHOD', 'GET')
+
+    # Handle CORS preflight requests
+    if method == 'OPTIONS':
+        status = '200 OK'
+        headers = add_cors_headers([('Content-Length', '0')])
+        start_response(status, headers)
+        return [b'']
 
     # Health check endpoint
     if path == '/health':
@@ -136,7 +156,12 @@ def application(environ, start_response):
     # If Tryton loaded successfully, delegate API requests to it
     if tryton_app:
         try:
-            return tryton_app(environ, start_response)
+            # Wrap Tryton response to add CORS headers
+            def cors_start_response(status, response_headers, exc_info=None):
+                response_headers = add_cors_headers(response_headers)
+                return start_response(status, response_headers, exc_info)
+
+            return tryton_app(environ, cors_start_response)
         except Exception as e:
             # Log error but still try to handle
             print(f"Tryton app error for path {path}: {e}")
@@ -146,6 +171,7 @@ def application(environ, start_response):
                 ('Content-Type', 'text/plain'),
                 ('Content-Length', str(len(error_body)))
             ]
+            headers = add_cors_headers(headers)
             start_response(status, headers)
             return [error_body]
     else:
@@ -156,6 +182,7 @@ def application(environ, start_response):
             ('Content-Type', 'text/plain'),
             ('Content-Length', str(len(error_body)))
         ]
+        headers = add_cors_headers(headers)
         start_response(status, headers)
         return [error_body]
 
