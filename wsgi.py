@@ -127,6 +127,130 @@ def serve_static_file(file_path, environ, start_response):
         start_response(status, headers)
         return [f'Error serving file: {str(e)}'.encode('utf-8')]
 
+def database_diagnostics(environ, start_response):
+    """Database diagnostics endpoint to help troubleshoot issues"""
+    try:
+        import psycopg2
+        from urllib.parse import urlparse
+
+        diagnostics = {
+            'timestamp': time.time(),
+            'environment': {},
+            'database': {},
+            'tryton': {},
+            'permissions': {}
+        }
+
+        # Environment check
+        diagnostics['environment'] = {
+            'DATABASE_URL': bool(os.environ.get('DATABASE_URL')),
+            'DATABASE_NAME': os.environ.get('DATABASE_NAME', 'Not set'),
+            'TRYTON_CONFIG': os.environ.get('TRYTON_CONFIG', 'Not set'),
+            'config_file_exists': os.path.exists(os.environ.get('TRYTON_CONFIG', '/app/railway-trytond.conf'))
+        }
+
+        # Database connectivity test
+        try:
+            db_url = os.environ.get('DATABASE_URL')
+            if db_url:
+                conn = psycopg2.connect(db_url)
+                cursor = conn.cursor()
+
+                # Check basic connectivity
+                cursor.execute("SELECT version();")
+                pg_version = cursor.fetchone()[0]
+                diagnostics['database']['postgresql_version'] = pg_version
+                diagnostics['database']['connection'] = 'SUCCESS'
+
+                # Check if database has Tryton tables
+                cursor.execute("""
+                    SELECT table_name FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name LIKE 'ir_%'
+                    LIMIT 5;
+                """)
+                tables = [row[0] for row in cursor.fetchall()]
+                diagnostics['database']['tryton_tables'] = tables
+                diagnostics['database']['has_tryton_schema'] = len(tables) > 0
+
+                # Check for users table specifically
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                        AND table_name = 'res_user'
+                    );
+                """)
+                has_users_table = cursor.fetchone()[0]
+                diagnostics['database']['has_users_table'] = has_users_table
+
+                if has_users_table:
+                    cursor.execute("SELECT COUNT(*) FROM res_user;")
+                    user_count = cursor.fetchone()[0]
+                    diagnostics['database']['user_count'] = user_count
+
+                conn.close()
+            else:
+                diagnostics['database']['connection'] = 'FAILED - No DATABASE_URL'
+        except Exception as e:
+            diagnostics['database']['connection'] = f'FAILED - {str(e)}'
+
+        # Tryton configuration test
+        try:
+            from trytond.config import config
+            config_file = os.environ.get('TRYTON_CONFIG', '/app/railway-trytond.conf')
+            if os.path.exists(config_file):
+                config.update_etc(config_file)
+                diagnostics['tryton']['config_loaded'] = True
+                diagnostics['tryton']['database_uri'] = config.get('database', 'uri', default='Not set')
+            else:
+                diagnostics['tryton']['config_loaded'] = False
+        except Exception as e:
+            diagnostics['tryton']['config_error'] = str(e)
+
+        # Tryton pool test
+        try:
+            from trytond.pool import Pool
+            database_name = os.environ.get('DATABASE_NAME', 'divvyqueue_prod')
+            pool = Pool(database_name)
+            diagnostics['tryton']['pool_created'] = True
+
+            try:
+                pool.init()
+                diagnostics['tryton']['pool_initialized'] = True
+
+                # Try to access a basic model
+                with pool.transaction().start(database_name, 1, context={}):
+                    User = pool.get('res.user')
+                    users = User.search([])
+                    diagnostics['tryton']['user_model_accessible'] = True
+                    diagnostics['tryton']['users_found'] = len(users)
+
+            except Exception as e:
+                diagnostics['tryton']['pool_init_error'] = str(e)
+
+        except Exception as e:
+            diagnostics['tryton']['pool_error'] = str(e)
+
+        response_body = json.dumps(diagnostics, indent=2).encode('utf-8')
+        status = '200 OK'
+        headers = add_cors_headers([
+            ('Content-Type', 'application/json'),
+            ('Content-Length', str(len(response_body)))
+        ])
+        start_response(status, headers)
+        return [response_body]
+
+    except Exception as e:
+        error_data = {'error': 'Diagnostics failed', 'message': str(e)}
+        error_body = json.dumps(error_data).encode('utf-8')
+        status = '500 Internal Server Error'
+        headers = add_cors_headers([
+            ('Content-Type', 'application/json'),
+            ('Content-Length', str(len(error_body)))
+        ])
+        start_response(status, headers)
+        return [error_body]
+
 def init_database_endpoint(environ, start_response):
     """Database initialization endpoint"""
     try:
@@ -214,6 +338,10 @@ def application(environ, start_response):
     # Database initialization endpoint
     if path == '/init-database' and method == 'POST':
         return init_database_endpoint(environ, start_response)
+
+    # Database diagnostics endpoint
+    if path == '/db-diagnostics':
+        return database_diagnostics(environ, start_response)
 
     # Serve SAO static files
     sao_root = '/app/sao'
