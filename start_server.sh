@@ -8,6 +8,13 @@ echo "WORKERS: ${WORKERS:-1}"
 # Use Railway's PORT or default to 8000
 export SERVER_PORT="${PORT:-8000}"
 
+# Create dynamic configuration with proper DATABASE_URL
+echo "=== Creating Dynamic Configuration ==="
+python3 create_config.py || {
+    echo "✗ Failed to create configuration"
+    exit 1
+}
+
 # Check and initialize database if needed
 echo "=== Checking Database Status ==="
 if python3 -c "

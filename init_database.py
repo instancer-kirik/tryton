@@ -35,6 +35,42 @@ def check_database_connection():
         log(f"✗ Database connection failed: {e}")
         return False
 
+def update_database_config():
+    """Update Tryton config file with proper database URI"""
+    try:
+        config_file = os.environ.get('TRYTON_CONFIG', '/app/railway-trytond.conf')
+        database_url = os.environ.get('DATABASE_URL')
+
+        if not database_url:
+            log("ERROR: DATABASE_URL environment variable not found")
+            return False
+
+        log(f"Updating config file {config_file} with database URL")
+
+        # Read the config file
+        with open(config_file, 'r') as f:
+            config_content = f.read()
+
+        # Replace the database URI
+        if 'uri = ${DATABASE_URL}' in config_content:
+            config_content = config_content.replace('uri = ${DATABASE_URL}', f'uri = {database_url}')
+        elif 'uri = postgresql://' in config_content:
+            config_content = config_content.replace('uri = postgresql://', f'uri = {database_url}')
+        else:
+            # Add the URI if it doesn't exist
+            config_content = config_content.replace('[database]', f'[database]\nuri = {database_url}')
+
+        # Write the updated config
+        with open(config_file, 'w') as f:
+            f.write(config_content)
+
+        log("✓ Database URI updated in config file")
+        return True
+
+    except Exception as e:
+        log(f"✗ Failed to update config file: {e}")
+        return False
+
 def is_database_initialized():
     """Check if Tryton database is already initialized"""
     try:
@@ -50,6 +86,7 @@ def is_database_initialized():
 
         # Try to access the database pool
         pool = Pool(database_name)
+        pool.init()
 
         # Try to access a basic table
         with pool.transaction().start(database_name, 1, context={}):
@@ -182,6 +219,11 @@ def main():
         return False
 
     log("✓ All required environment variables present")
+
+    # Update database configuration
+    if not update_database_config():
+        log("✗ Failed to update database configuration")
+        return False
 
     # Check database connectivity
     if not check_database_connection():
