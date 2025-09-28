@@ -35,6 +35,12 @@ python-sql>=1.4.0
 # HTTP requests
 requests>=2.31.0
 
+# JSON handling (usually included with Python but explicit for clarity)
+# Already available in standard library
+
+# Additional HTTP client dependencies
+urllib3>=1.26.0
+
 # Standard number formats
 python-stdnum>=1.19
 

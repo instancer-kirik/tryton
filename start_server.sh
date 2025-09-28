@@ -7,6 +7,20 @@ echo "PORT: ${PORT:-8000}"
 echo "WORKERS: ${WORKERS:-1}"
 echo "Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
 
+# Run security validation in Railway environment
+echo "=== Security Validation ==="
+if [[ "${RAILWAY_ENVIRONMENT}" == "production" ]]; then
+    echo "Running production security validation..."
+    if python3 validate_env.py; then
+        echo "✓ Security validation passed"
+    else
+        echo "✗ Security validation failed - stopping deployment"
+        exit 1
+    fi
+else
+    echo "Skipping security validation in ${RAILWAY_ENVIRONMENT:-development} environment"
+fi
+
 # Use Railway's PORT or default to 8000
 export SERVER_PORT="${PORT:-8000}"
 

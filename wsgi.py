@@ -62,7 +62,41 @@ def add_cors_headers(headers):
     return headers + cors_headers
 
 def health_check(environ, start_response):
-    """Health check endpoint for Railway"""
+    """Health check endpoint for Railway with security validation"""
+
+    # Basic security checks
+    security_status = {
+        'config_file_exists': os.path.exists('/app/railway-trytond.conf'),
+        'config_file_secure': False,
+        'admin_password_set': bool(os.environ.get('ADMIN_PASSWORD')),
+        'secret_key_set': bool(os.environ.get('SECRET_KEY')),
+        'database_url_set': bool(os.environ.get('DATABASE_URL')),
+        'cors_secure': False
+    }
+
+    # Check config file permissions
+    if security_status['config_file_exists']:
+        try:
+            stat_info = os.stat('/app/railway-trytond.conf')
+            security_status['config_file_secure'] = (stat_info.st_mode & 0o777) == 0o600
+        except:
+            pass
+
+    # Check CORS security
+    cors_origins = os.environ.get('CORS_ORIGINS', '')
+    security_status['cors_secure'] = cors_origins and '*' not in cors_origins
+
+    # Overall security score
+    security_checks = [
+        security_status['config_file_exists'],
+        security_status['config_file_secure'],
+        security_status['admin_password_set'],
+        security_status['secret_key_set'],
+        security_status['database_url_set'],
+        security_status['cors_secure']
+    ]
+    security_score = sum(security_checks) / len(security_checks) * 100
+
     response_data = {
         'status': 'healthy' if tryton_app else 'unhealthy',
         'timestamp': time.time(),
@@ -70,8 +104,19 @@ def health_check(environ, start_response):
         'method': environ.get('REQUEST_METHOD', 'GET'),
         'tryton_loaded': tryton_app is not None,
         'wsgi_version': WSGI_VERSION,
-        'message': 'Tryton ready' if tryton_app else 'Tryton failed to load'
+        'message': 'Tryton ready' if tryton_app else 'Tryton failed to load',
+        'security': {
+            'score': round(security_score, 1),
+            'status': 'secure' if security_score >= 80 else 'needs_attention',
+            'checks_passed': sum(security_checks),
+            'total_checks': len(security_checks)
+        },
+        'environment': os.environ.get('RAILWAY_ENVIRONMENT', 'unknown')
     }
+
+    # Include detailed security info for admin health checks (via query parameter)
+    if environ.get('QUERY_STRING') == 'security=detailed':
+        response_data['security']['details'] = security_status
 
     response_body = json.dumps(response_data).encode('utf-8')
     status = '200 OK' if tryton_app else '503 Service Unavailable'
@@ -251,6 +296,131 @@ def database_diagnostics(environ, start_response):
         start_response(status, headers)
         return [error_body]
 
+def security_validation_endpoint(environ, start_response):
+    """Security validation endpoint for Railway administration"""
+
+    # Only allow GET and POST methods
+    method = environ.get('REQUEST_METHOD', 'GET')
+    if method not in ['GET', 'POST']:
+        response_data = {'error': 'Method not allowed'}
+        response_body = json.dumps(response_data).encode('utf-8')
+        headers = [('Content-Type', 'application/json')]
+        headers = add_cors_headers(headers)
+        start_response('405 Method Not Allowed', headers)
+        return [response_body]
+
+    try:
+        # Run security validation
+        import subprocess
+        import tempfile
+
+        validation_results = {
+            'timestamp': time.time(),
+            'environment': os.environ.get('RAILWAY_ENVIRONMENT', 'unknown'),
+            'validation_passed': False,
+            'errors': [],
+            'warnings': [],
+            'info': []
+        }
+
+        # Run environment validation script
+        try:
+            result = subprocess.run(
+                ['python3', 'validate_env.py'],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd='/app'
+            )
+
+            if result.returncode == 0:
+                validation_results['validation_passed'] = True
+                validation_results['info'].append('Environment validation passed')
+            else:
+                validation_results['errors'].append('Environment validation failed')
+
+            # Parse output for detailed results
+            output_lines = result.stdout.split('\n')
+            for line in output_lines:
+                if '❌ ERROR:' in line:
+                    validation_results['errors'].append(line.replace('❌ ERROR: ', ''))
+                elif '⚠️  WARNING:' in line:
+                    validation_results['warnings'].append(line.replace('⚠️  WARNING: ', ''))
+                elif '✅ SUCCESS:' in line:
+                    validation_results['info'].append(line.replace('✅ SUCCESS: ', ''))
+
+        except subprocess.TimeoutExpired:
+            validation_results['errors'].append('Validation script timed out')
+        except Exception as e:
+            validation_results['errors'].append(f'Validation script error: {str(e)}')
+
+        # Additional security checks
+        config_file = '/app/railway-trytond.conf'
+        if os.path.exists(config_file):
+            try:
+                stat_info = os.stat(config_file)
+                perms = stat_info.st_mode & 0o777
+                if perms == 0o600:
+                    validation_results['info'].append('Configuration file has secure permissions (600)')
+                else:
+                    validation_results['warnings'].append(f'Configuration file permissions: {oct(perms)} (should be 600)')
+            except Exception as e:
+                validation_results['errors'].append(f'Cannot check config file permissions: {str(e)}')
+        else:
+            validation_results['errors'].append('Configuration file not found')
+
+        # Check environment variables without exposing values
+        required_vars = ['DATABASE_URL', 'ADMIN_PASSWORD', 'SECRET_KEY']
+        for var in required_vars:
+            if os.environ.get(var):
+                validation_results['info'].append(f'{var} is configured')
+            else:
+                validation_results['errors'].append(f'{var} is not set')
+
+        # Check CORS configuration
+        cors_origins = os.environ.get('CORS_ORIGINS', '')
+        if cors_origins:
+            if '*' in cors_origins:
+                validation_results['errors'].append('CORS_ORIGINS contains wildcard (*) - security risk')
+            else:
+                validation_results['info'].append('CORS_ORIGINS is securely configured')
+        else:
+            validation_results['warnings'].append('CORS_ORIGINS not set')
+
+        # Overall status
+        validation_results['overall_status'] = (
+            'secure' if validation_results['validation_passed'] and not validation_results['errors']
+            else 'needs_attention' if validation_results['warnings'] and not validation_results['errors']
+            else 'insecure'
+        )
+
+        response_body = json.dumps(validation_results, indent=2).encode('utf-8')
+        status = '200 OK' if validation_results['validation_passed'] else '400 Bad Request'
+        headers = [
+            ('Content-Type', 'application/json'),
+            ('Content-Length', str(len(response_body)))
+        ]
+        headers = add_cors_headers(headers)
+
+        start_response(status, headers)
+        return [response_body]
+
+    except Exception as e:
+        error_response = {
+            'error': 'Security validation failed',
+            'message': str(e),
+            'timestamp': time.time()
+        }
+        response_body = json.dumps(error_response).encode('utf-8')
+        headers = [
+            ('Content-Type', 'application/json'),
+            ('Content-Length', str(len(response_body)))
+        ]
+        headers = add_cors_headers(headers)
+
+        start_response('500 Internal Server Error', headers)
+        return [response_body]
+
 def init_database_endpoint(environ, start_response):
     """Database initialization endpoint with robust error handling"""
     try:
@@ -412,6 +582,10 @@ def application(environ, start_response):
     # Health check endpoint
     if path == '/health':
         return health_check(environ, start_response)
+
+    # Security validation endpoint
+    if path == '/security-check':
+        return security_validation_endpoint(environ, start_response)
 
     # Database initialization endpoint
     if path == '/init-database' and method == 'POST':
