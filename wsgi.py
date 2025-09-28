@@ -252,10 +252,11 @@ def database_diagnostics(environ, start_response):
         return [error_body]
 
 def init_database_endpoint(environ, start_response):
-    """Database initialization endpoint"""
+    """Database initialization endpoint with robust error handling"""
     try:
         from trytond.pool import Pool
         from trytond.config import config
+        from trytond.modules import get_module_list
         import subprocess
 
         config_file = os.environ.get('TRYTON_CONFIG', '/app/railway-trytond.conf')
@@ -264,9 +265,13 @@ def init_database_endpoint(environ, start_response):
         if os.path.exists(config_file):
             config.update_etc(config_file)
 
-        response_data = {'status': 'checking', 'database': database_name}
+        response_data = {
+            'status': 'initializing',
+            'database': database_name,
+            'steps': []
+        }
 
-        # Check if database is already initialized
+        # Step 1: Check if database is already initialized
         try:
             pool = Pool(database_name)
             pool.init()
@@ -275,31 +280,100 @@ def init_database_endpoint(environ, start_response):
                 users = User.search([])
                 response_data.update({
                     'status': 'already_initialized',
-                    'message': f'Database already initialized with {len(users)} users'
+                    'message': f'Database already initialized with {len(users)} users',
+                    'steps': ['Database check: Already initialized']
                 })
-        except Exception:
-            # Database not initialized, try to initialize
+        except Exception as check_error:
+            response_data['steps'].append(f'Database check: Not initialized - {str(check_error)}')
+
+            # Step 2: Initialize database with core modules
             try:
-                cmd = ['trytond-admin', '-c', config_file, '-d', database_name, '--all']
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                response_data['steps'].append('Starting database initialization...')
+
+                # Create database structure
+                cmd = [
+                    'trytond-admin',
+                    '-c', config_file,
+                    '-d', database_name,
+                    '--all'
+                ]
+
+                response_data['steps'].append(f'Running: {" ".join(cmd)}')
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
                 if result.returncode == 0:
-                    response_data.update({
-                        'status': 'initialized',
-                        'message': 'Database initialized successfully'
-                    })
+                    response_data['steps'].append('Database structure created successfully')
+
+                    # Step 3: Set admin password if provided
+                    admin_password = os.environ.get('ADMIN_PASSWORD', 'admin')
+                    try:
+                        cmd_password = [
+                            'trytond-admin',
+                            '-c', config_file,
+                            '-d', database_name,
+                            '--password'
+                        ]
+
+                        response_data['steps'].append('Setting admin password...')
+                        result_password = subprocess.run(
+                            cmd_password,
+                            input=admin_password,
+                            text=True,
+                            capture_output=True,
+                            timeout=60
+                        )
+
+                        if result_password.returncode == 0:
+                            response_data['steps'].append('Admin password set successfully')
+                        else:
+                            response_data['steps'].append(f'Password setting failed: {result_password.stderr}')
+
+                    except Exception as pwd_error:
+                        response_data['steps'].append(f'Password setting error: {str(pwd_error)}')
+
+                    # Step 4: Verify initialization
+                    try:
+                        pool = Pool(database_name)
+                        pool.init()
+                        with pool.transaction().start(database_name, 1, context={}):
+                            User = pool.get('res.user')
+                            users = User.search([])
+                            response_data.update({
+                                'status': 'success',
+                                'message': f'Database initialized successfully with {len(users)} users',
+                            })
+                            response_data['steps'].append(f'Verification: Found {len(users)} users')
+                    except Exception as verify_error:
+                        response_data.update({
+                            'status': 'partial_success',
+                            'message': f'Database created but verification failed: {str(verify_error)}'
+                        })
+                        response_data['steps'].append(f'Verification failed: {str(verify_error)}')
+
                 else:
                     response_data.update({
                         'status': 'failed',
-                        'message': f'Initialization failed: {result.stderr}'
+                        'message': f'Database initialization failed: {result.stderr}'
                     })
-            except Exception as e:
+                    response_data['steps'].append(f'Initialization failed: {result.stderr}')
+                    if result.stdout:
+                        response_data['steps'].append(f'STDOUT: {result.stdout}')
+
+            except subprocess.TimeoutExpired:
+                response_data.update({
+                    'status': 'timeout',
+                    'message': 'Database initialization timed out after 10 minutes'
+                })
+                response_data['steps'].append('ERROR: Initialization timeout')
+
+            except Exception as init_error:
                 response_data.update({
                     'status': 'error',
-                    'message': f'Initialization error: {str(e)}'
+                    'message': f'Initialization error: {str(init_error)}'
                 })
+                response_data['steps'].append(f'Initialization error: {str(init_error)}')
 
-        response_body = json.dumps(response_data).encode('utf-8')
+        response_body = json.dumps(response_data, indent=2).encode('utf-8')
         status = '200 OK'
         headers = add_cors_headers([
             ('Content-Type', 'application/json'),
@@ -309,8 +383,12 @@ def init_database_endpoint(environ, start_response):
         return [response_body]
 
     except Exception as e:
-        error_data = {'status': 'error', 'message': str(e)}
-        error_body = json.dumps(error_data).encode('utf-8')
+        error_data = {
+            'status': 'error',
+            'message': f'Endpoint error: {str(e)}',
+            'steps': [f'Critical error: {str(e)}']
+        }
+        error_body = json.dumps(error_data, indent=2).encode('utf-8')
         status = '500 Internal Server Error'
         headers = add_cors_headers([
             ('Content-Type', 'application/json'),
