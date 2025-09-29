@@ -61,12 +61,24 @@ def create_tryton_config():
 
     # Get environment variables
     database_url = os.environ.get('DATABASE_URL')
-    database_name = os.environ.get('DATABASE_NAME', 'divvyqueue_prod')
+    database_name = os.environ.get('DATABASE_NAME', 'railway')  # Changed default to railway
     admin_password = os.environ.get('ADMIN_PASSWORD')
     session_timeout = os.environ.get('SESSION_TIMEOUT', '3600')
     log_level = os.environ.get('LOG_LEVEL', 'INFO')
     cache_model_size = os.environ.get('CACHE_MODEL_SIZE', '200')
     cache_record_size = os.environ.get('CACHE_RECORD_SIZE', '2000')
+
+    # Extract actual database name from DATABASE_URL for Railway compatibility
+    if database_url and 'railway.internal' in database_url:
+        try:
+            import urllib.parse
+            parsed = urllib.parse.urlparse(database_url)
+            actual_db_name = parsed.path.lstrip('/')
+            if actual_db_name:
+                database_name = actual_db_name
+                print(f"INFO: Using database name from URL: {database_name}")
+        except Exception as e:
+            print(f"WARNING: Could not parse database name from URL: {e}")
 
     # Parse database URL for validation (don't store components)
     db_info = parse_database_url(database_url)
